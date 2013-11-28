@@ -11,28 +11,48 @@
 package com.codeaffine.osgi.testuite;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
+import org.eclipse.osgi.service.resolver.BundleDescription;
 import org.junit.runners.model.InitializationError;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
+import org.osgi.framework.Filter;
 import org.osgi.framework.FrameworkUtil;
-
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.framework.wiring.BundleRevision;
 
 class TestCollector {
+
   private final String[] bundleSymbolicNames;
+  private final String[] pattern;
   private final BundleContext bundleContext;
   private final Set<Class<?>> classes;
   private final Properties devProperties;
 
   TestCollector( String... bundleSymbolicNames ) {
-    this( getBundleContext(), bundleSymbolicNames );
+    this( new String[]{
+      "*Test.class"
+    }, bundleSymbolicNames );
+  }
+
+  TestCollector( String[] pattern, String... bundleSymbolicNames ) {
+    this( getBundleContext(), pattern, bundleSymbolicNames );
   }
 
   TestCollector( BundleContext bundleContext, String... bundleSymbolicNames ) {
+    this( bundleContext, new String[]{
+      "*Test.class"
+    }, bundleSymbolicNames );
+  }
+
+  TestCollector( BundleContext bundleContext, String[] pattern, String... bundleSymbolicNames ) {
     this.bundleContext = bundleContext;
+    this.pattern = pattern;
     this.bundleSymbolicNames = bundleSymbolicNames;
     this.classes = new HashSet<Class<?>>();
     this.devProperties = new DevPropertiesLoader( bundleContext ).load();
@@ -47,8 +67,29 @@ class TestCollector {
 
   private void collect( String bundleSymbolicName ) throws InitializationError {
     Bundle bundle = getBundle( bundleSymbolicName );
-    Class<?>[] scan = new ClassPathScanner( bundle, devProperties, "*Test.class" ).scan();
-    classes.addAll( Arrays.asList( scan ) );
+    if( matchesPlatform( bundle ) ) {
+      Class<?>[] scan = new ClassPathScanner( bundle, devProperties, pattern ).scan();
+      classes.addAll( Arrays.asList( scan ) );
+    }
+  }
+
+  private static boolean matchesPlatform( Bundle bundle ) {
+    BundleDescription desc = ( BundleDescription )bundle.adapt( BundleRevision.class );
+    String platformFilter = desc.getPlatformFilter();
+    if(platformFilter==null) {
+      return true;
+    }
+
+    try {
+      Filter filter = FrameworkUtil.createFilter( platformFilter );
+      Map<String, String> prop = new HashMap<String, String>();
+      prop.put( "osgi.os",  System.getProperty( "osgi.os"));
+      prop.put( "osgi.arch",  System.getProperty( "osgi.arch"));
+      prop.put( "osgi.ws",  System.getProperty( "osgi.ws"));
+      return filter.matches( prop );
+    } catch( InvalidSyntaxException e ) {
+      throw new IllegalStateException( e );
+    }
   }
 
   private Bundle getBundle( String bundleSymbolicName ) throws InitializationError {
@@ -67,6 +108,8 @@ class TestCollector {
 
   private static BundleContext getBundleContext() {
     Bundle bundle = FrameworkUtil.getBundle( TestCollector.class );
-    return bundle == null ? null : bundle.getBundleContext();
+    return bundle == null
+                         ? null
+                         : bundle.getBundleContext();
   }
 }

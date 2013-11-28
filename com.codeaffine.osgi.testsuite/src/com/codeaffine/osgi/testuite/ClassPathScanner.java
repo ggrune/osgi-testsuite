@@ -10,28 +10,36 @@
  ******************************************************************************/
 package com.codeaffine.osgi.testuite;
 
+import java.lang.reflect.Modifier;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 
+import org.eclipse.osgi.service.resolver.BundleDescription;
+import org.eclipse.osgi.service.resolver.HostSpecification;
+import org.junit.Test;
+import org.junit.runners.model.FrameworkMethod;
 import org.junit.runners.model.InitializationError;
+import org.junit.runners.model.TestClass;
 import org.osgi.framework.Bundle;
-import org.osgi.framework.wiring.BundleWiring;
-
+import org.osgi.framework.wiring.BundleRevision;
 
 class ClassPathScanner {
-  private static final String DOT_CLASS = ".class";
 
+  private static final String DOT_CLASS = ".class";
   private final Bundle bundle;
   private final Properties devProperties;
-  private final String pattern;
+  private final String[] pattern;
   private final Set<Class<?>> classes;
 
-  ClassPathScanner( Bundle bundle, Properties devProperties, String pattern ) {
+  ClassPathScanner( Bundle bundle, Properties devProperties, String... pattern ) {
     this.bundle = bundle;
     this.devProperties = devProperties;
     this.pattern = pattern;
@@ -55,16 +63,27 @@ class ClassPathScanner {
   }
 
   private Collection<String> listResources( String classPathRoot ) {
-    BundleWiring bundleWiring = bundle.adapt( BundleWiring.class );
-    int options = BundleWiring.LISTRESOURCES_LOCAL | BundleWiring.LISTRESOURCES_RECURSE;
-    return bundleWiring.listResources( classPathRoot, pattern, options );
+    List<String> resources = new ArrayList<String>();
+    for( String p : pattern ) {
+      Enumeration<URL> root = bundle.findEntries( classPathRoot, p, true );
+      while( root != null && root.hasMoreElements() ) {
+        URL url = root.nextElement();
+        resources.add( url.getFile().replace( classPathRoot + "/", "" ) );
+      }
+    }
+    return resources;
   }
 
   private void loadClasses( Collection<String> resources ) throws InitializationError {
     for( String resource : resources ) {
       String className = toClassName( stripClassPathRoot( resource ) );
       Class<?> loadedClass = loadClass( className );
-      classes.add( loadedClass );
+      TestClass testClass = new TestClass( loadedClass );
+      List<FrameworkMethod> annotatedMethods = testClass.getAnnotatedMethods( Test.class );
+
+      if( !annotatedMethods.isEmpty() && !Modifier.isAbstract( loadedClass.getModifiers() ) ) {
+        classes.add( loadedClass );
+      }
     }
   }
 
@@ -81,7 +100,17 @@ class ClassPathScanner {
   }
 
   private Class<?> loadClass( String className ) throws InitializationError {
+    BundleDescription desc = ( BundleDescription )bundle.adapt( BundleRevision.class );
     try {
+      if( desc.getTypes() == BundleRevision.TYPE_FRAGMENT ) {
+        HostSpecification host = desc.getHost();
+        BundleDescription[] hosts = host.getHosts();
+        if( hosts.length == 0 ) {
+          throw new InitializationError( "Missing host bundle for fragment "
+                                         + bundle.getSymbolicName() );
+        }
+        return hosts[ 0 ].getBundle().loadClass( className );
+      }
       return bundle.loadClass( className );
     } catch( ClassNotFoundException exception ) {
       throw new InitializationError( exception );
@@ -118,5 +147,4 @@ class ClassPathScanner {
       collection.addAll( Arrays.asList( classPathRoots.split( "," ) ) );
     }
   }
-
 }
