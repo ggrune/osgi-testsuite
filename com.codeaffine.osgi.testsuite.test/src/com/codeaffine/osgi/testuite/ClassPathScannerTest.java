@@ -13,29 +13,31 @@ package com.codeaffine.osgi.testuite;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
-import static org.mockito.Matchers.anyInt;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.util.Arrays;
+import java.net.URL;
+import java.util.Enumeration;
 import java.util.Properties;
 
+import org.eclipse.osgi.service.resolver.BundleDescription;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runners.model.InitializationError;
 import org.osgi.framework.Bundle;
+import org.osgi.framework.wiring.BundleRevision;
 import org.osgi.framework.wiring.BundleWiring;
 
 public class ClassPathScannerTest {
-  private static final String PATTERN = "*";
 
+  private static final String PATTERN = "*";
   private Bundle bundle;
   private Properties devProperties;
 
   @Test
   public void testScanWithoutDevProperties() throws Exception {
-    addTestResource( bundle, FooTest.class.getName(), FooTest.class );
+    addTestResource( bundle, "/", FooTest.class.getName(), FooTest.class );
 
     ClassPathScanner scanner = new ClassPathScanner( bundle, devProperties, PATTERN );
     Class<?>[] classes = scanner.scan();
@@ -45,7 +47,7 @@ public class ClassPathScannerTest {
 
   @Test
   public void testScanWithNonMatchingDevProperties() throws Exception {
-    addTestResource( bundle, FooTest.class.getName(), FooTest.class );
+    addTestResource( bundle, "/", FooTest.class.getName(), FooTest.class );
     devProperties.setProperty( "some.bogus.bundle.name", "bin" );
 
     ClassPathScanner scanner = new ClassPathScanner( bundle, devProperties, PATTERN );
@@ -56,7 +58,7 @@ public class ClassPathScannerTest {
 
   @Test
   public void testScanWithBundleSpecificClassPathRoot() throws Exception {
-    addTestResource( bundle, "bin/" + FooTest.class.getName(), FooTest.class );
+    addTestResource( bundle, "bin", FooTest.class.getName(), FooTest.class );
     devProperties.setProperty( bundle.getSymbolicName(), "bin" );
 
     ClassPathScanner scanner = new ClassPathScanner( bundle, devProperties, PATTERN );
@@ -67,7 +69,7 @@ public class ClassPathScannerTest {
 
   @Test
   public void testScanWithGeneralClassPathRoot() throws Exception {
-    addTestResource( bundle, "bin/" + FooTest.class.getName(), FooTest.class );
+    addTestResource( bundle, "bin", FooTest.class.getName(), FooTest.class );
     devProperties.setProperty( "*", "bin" );
 
     ClassPathScanner scanner = new ClassPathScanner( bundle, devProperties, PATTERN );
@@ -77,8 +79,8 @@ public class ClassPathScannerTest {
   }
 
   @Test
-  public void testScanWithNonExistingClass() throws ClassNotFoundException {
-    addTestResource( bundle, FooTest.class.getName(), FooTest.class );
+  public void testScanWithNonExistingClass() throws Exception {
+    addTestResource( bundle, "/", FooTest.class.getName(), FooTest.class );
     ClassNotFoundException classNotFoundException = new ClassNotFoundException();
     when( bundle.loadClass( anyString() ) ).thenThrow( classNotFoundException );
     ClassPathScanner scanner = new ClassPathScanner( bundle, devProperties, PATTERN );
@@ -106,16 +108,23 @@ public class ClassPathScannerTest {
   }
 
   @SuppressWarnings({"unchecked", "rawtypes"})
-  private static void addTestResource( Bundle bundle, String resourceName, Class clazz )
-    throws ClassNotFoundException
+  private static void addTestResource( Bundle bundle, String classPathRoot, String resourceName, Class clazz )
+    throws Exception
   {
-    BundleWiring bundleWiring = bundle.adapt( BundleWiring.class );
-    when( bundleWiring.listResources( anyString(), anyString(), anyInt() ) )
-      .thenReturn( Arrays.asList( resourceName ) );
+    Enumeration<URL> root = mock( Enumeration.class );
+    URL url = new URL( "file", null, 0, resourceName, null );
+    BundleDescription desc = mock( BundleDescription.class );
+    when( root.hasMoreElements() ).thenReturn( true, false );
+    when( root.nextElement() ).thenReturn( url );
+    when( bundle.findEntries( classPathRoot, "*", true ) ).thenReturn( root );
+    when( bundle.adapt( BundleRevision.class ) ).thenReturn( desc );
     when( bundle.loadClass( clazz.getName() ) ).thenReturn( clazz );
   }
 
   private static class FooTest {
+    @Test
+    public void test() throws Exception {
+    }
   }
 
 }
